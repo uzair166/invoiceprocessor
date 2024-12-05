@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
