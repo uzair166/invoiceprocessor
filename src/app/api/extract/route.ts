@@ -132,7 +132,7 @@ export async function POST(req: Request) {
           { role: "system", content: EXTRACTION_PROMPT },
           { role: "user", content: pdfData.text },
         ],
-        model: "gpt-3.5-turbo-1106", // Faster model
+        model: "gpt-3.5-turbo",
         temperature: 0.1, // Lower temperature for more focused responses
         response_format: { type: "json_object" }, // Enforce JSON response
       });
