@@ -7,6 +7,20 @@ import Invoice from "@/models/Invoice";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
+// Add CORS preflight
+export async function OPTIONS() {
+  return NextResponse.json(
+    {},
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    }
+  );
+}
+
 // Custom logger for detailed process tracking
 const logger = {
   info: (message: string, data?: any) => {
@@ -78,6 +92,12 @@ const EXTRACTION_PROMPT = `Extract invoice data as JSON. Format: dates as YYYY-M
 }`;
 
 export async function POST(req: Request) {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+
   try {
     logger.info("Starting invoice processing");
 
@@ -86,14 +106,17 @@ export async function POST(req: Request) {
     const file = formData.get("file") as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No file uploaded" },
+        { status: 400, headers }
+      );
     }
 
     // Early validation of file type
     if (file.type !== "application/pdf") {
       return NextResponse.json(
         { error: "Invalid file type. Please upload a PDF file." },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
 
@@ -101,7 +124,7 @@ export async function POST(req: Request) {
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
         { error: "File too large. Maximum size is 10MB." },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
 
@@ -122,7 +145,7 @@ export async function POST(req: Request) {
             error:
               "Could not extract text from PDF. Please ensure the PDF contains readable text.",
           },
-          { status: 400 }
+          { status: 400, headers }
         );
       }
 
@@ -132,7 +155,7 @@ export async function POST(req: Request) {
           { role: "system", content: EXTRACTION_PROMPT },
           { role: "user", content: pdfData.text },
         ],
-        model: "gpt-3.5-turbo",
+        model: "gpt-4",
         temperature: 0.1, // Lower temperature for more focused responses
         response_format: { type: "json_object" }, // Enforce JSON response
       });
@@ -150,11 +173,14 @@ export async function POST(req: Request) {
 
       const savedInvoice = await invoice.save();
 
-      return NextResponse.json({
-        success: true,
-        message: "Invoice processed successfully",
-        invoice: savedInvoice,
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          message: "Invoice processed successfully",
+          invoice: savedInvoice,
+        },
+        { headers }
+      );
     } catch (error: any) {
       logger.error("Processing error", error);
       return NextResponse.json(
@@ -162,14 +188,14 @@ export async function POST(req: Request) {
           error: "Error processing invoice",
           details: error.message,
         },
-        { status: 500 }
+        { status: 500, headers }
       );
     }
   } catch (error: any) {
     logger.error("Fatal error", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500, headers }
     );
   }
 }
