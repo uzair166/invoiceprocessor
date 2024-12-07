@@ -22,7 +22,7 @@ export async function OPTIONS() {
 }
 
 // Optimized prompt for faster processing
-const EXTRACTION_PROMPT = `Extract invoice data as JSON. Focus on these specific fields:
+const EXTRACTION_PROMPT = `Extract data for ALL invoices in the PDF as JSON. Each invoice should have these fields:
 
 1. Invoice level:
    - Invoice number (e.g., "3620/00104227" or "E17/IN525138")
@@ -32,7 +32,7 @@ const EXTRACTION_PROMPT = `Extract invoice data as JSON. Focus on these specific
    - VAT amount
    - Net total (after VAT)
 
-2. For each item:
+2. For each item in each invoice:
    - Item code/SKU (e.g., "AGSTB005" or "969696905865")
    - Description (e.g., "JEWSON Sharp Concreting Sand")
    - Quantity (as number)
@@ -42,24 +42,28 @@ const EXTRACTION_PROMPT = `Extract invoice data as JSON. Focus on these specific
    - VAT amount for item
    - Net total for item
 
-Return as JSON:
+Return as JSON array of invoices:
 {
-  "invoiceNumber": "string",
-  "companyFrom": "string",
-  "invoiceDate": "YYYY-MM-DD",
-  "grossTotal": number,
-  "vatTotal": number,
-  "netTotal": number,
-  "items": [
+  "invoices": [
     {
-      "itemCode": "string",
-      "description": "string",
-      "quantity": number,
-      "unit": "string",
-      "pricePerItem": number,
+      "invoiceNumber": "string",
+      "companyFrom": "string",
+      "invoiceDate": "YYYY-MM-DD",
       "grossTotal": number,
-      "vatAmount": number,
-      "netTotal": number
+      "vatTotal": number,
+      "netTotal": number,
+      "items": [
+        {
+          "itemCode": "string",
+          "description": "string",
+          "quantity": number,
+          "unit": "string",
+          "pricePerItem": number,
+          "grossTotal": number,
+          "vatAmount": number,
+          "netTotal": number
+        }
+      ]
     }
   ]
 }`;
@@ -133,35 +137,44 @@ export async function POST(req: Request) {
       // Parse and validate the extracted data
       const extractedData = JSON.parse(completion.choices[0].message.content);
 
-      // Connect to MongoDB and save
-      await connectDB();
-      const invoice = new Invoice({
-        ...extractedData,
-        pdfUrl: file.name,
-        lastUpdated: new Date(),
-      });
+      if (!extractedData.invoices || !Array.isArray(extractedData.invoices)) {
+        throw new Error("Invalid response format from OpenAI");
+      }
 
-      const savedInvoice = await invoice.save();
+      // Connect to MongoDB
+      await connectDB();
+
+      // Save all invoices
+      const savedInvoices = await Promise.all(
+        extractedData.invoices.map(async (invoiceData) => {
+          const invoice = new Invoice({
+            ...invoiceData,
+            pdfUrl: file.name,
+            lastUpdated: new Date(),
+          });
+          return await invoice.save();
+        })
+      );
 
       return NextResponse.json(
         {
           success: true,
-          message: "Invoice processed successfully",
-          invoice: savedInvoice,
+          message: `Successfully processed ${savedInvoices.length} invoice(s)`,
+          invoices: savedInvoices,
         },
         { headers }
       );
-    } catch (error: Error) {
+    } catch (error: any) {
       console.error("Processing error:", error);
       return NextResponse.json(
         {
-          error: "Error processing invoice",
+          error: "Error processing invoice(s)",
           details: error.message,
         },
         { status: 500, headers }
       );
     }
-  } catch (error: Error) {
+  } catch (error: any) {
     console.error("Fatal error:", error);
     return NextResponse.json(
       { error: "Internal server error" },

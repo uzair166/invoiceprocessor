@@ -24,10 +24,21 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import toast from "react-hot-toast";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import FileUpload from "./FileUpload";
 
 // Custom styles for AG Grid
-const gridStyles = `
-  .ag-theme-alpine .ag-header-cell {
+const gridStyles = `.ag-theme-alpine .ag-header-cell {
     padding: 0 8px !important;
     height: 30px !important;
     line-height: 30px !important;
@@ -121,6 +132,27 @@ interface FlattenedInvoiceRow {
   isTotal: boolean;
 }
 
+interface DeleteCellProps extends ICellRendererParams {
+  onDelete: (id: string) => void;
+}
+
+const DeleteCell = ({ data, onDelete }: DeleteCellProps) => {
+  if (!data.isTotal) return null;
+
+  return (
+    <Button
+      variant="destructive"
+      size="sm"
+      onClick={(e) => {
+        e.stopPropagation();
+        onDelete(data._id);
+      }}
+    >
+      Delete
+    </Button>
+  );
+};
+
 export function DataTable({
   data,
   fetchData,
@@ -131,12 +163,34 @@ export function DataTable({
   isLoading: boolean;
 }) {
   const [rowData, setRowData] = useState<FlattenedInvoiceRow[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<string | null>(null);
 
   // Transform invoice data into flattened rows
   useEffect(() => {
     const flattenedRows: FlattenedInvoiceRow[] = [];
 
     data.forEach((invoice) => {
+      // Add total row first
+      flattenedRows.push({
+        _id: invoice._id,
+        invoiceNumber: invoice.invoiceNumber,
+        companyFrom: invoice.companyFrom,
+        invoiceDate: invoice.invoiceDate,
+        invoiceGrossTotal: invoice.grossTotal,
+        invoiceVatTotal: invoice.vatTotal,
+        invoiceNetTotal: invoice.netTotal,
+        itemCode: "",
+        description: "TOTAL FOR INVOICE",
+        quantity: 0,
+        unit: "",
+        pricePerItem: 0,
+        itemGrossTotal: invoice.grossTotal,
+        itemVatAmount: invoice.vatTotal,
+        itemNetTotal: invoice.netTotal,
+        isTotal: true,
+      });
+
       // Add individual item rows
       invoice.items.forEach((item) => {
         flattenedRows.push({
@@ -159,29 +213,58 @@ export function DataTable({
         });
       });
 
-      // Add total row
+      // Add separator row
       flattenedRows.push({
-        _id: invoice._id,
-        invoiceNumber: invoice.invoiceNumber,
-        companyFrom: invoice.companyFrom,
-        invoiceDate: invoice.invoiceDate,
-        invoiceGrossTotal: invoice.grossTotal,
-        invoiceVatTotal: invoice.vatTotal,
-        invoiceNetTotal: invoice.netTotal,
+        _id: "",
+        invoiceNumber: "",
+        companyFrom: "",
+        invoiceDate: "",
+        invoiceGrossTotal: 0,
+        invoiceVatTotal: 0,
+        invoiceNetTotal: 0,
         itemCode: "",
-        description: "TOTAL FOR INVOICE",
+        description: "",
         quantity: 0,
         unit: "",
         pricePerItem: 0,
-        itemGrossTotal: invoice.grossTotal,
-        itemVatAmount: invoice.vatTotal,
-        itemNetTotal: invoice.netTotal,
-        isTotal: true,
+        itemGrossTotal: 0,
+        itemVatAmount: 0,
+        itemNetTotal: 0,
+        isTotal: false,
       });
     });
 
     setRowData(flattenedRows);
   }, [data]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    setInvoiceToDelete(id);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!invoiceToDelete) return;
+
+    try {
+      const response = await fetch(`/api/invoices?id=${invoiceToDelete}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to delete invoice");
+      }
+
+      await fetchData();
+      toast.success("Invoice deleted successfully");
+    } catch (error: any) {
+      console.error("Error deleting invoice:", error);
+      toast.error(error.message || "Failed to delete invoice");
+    } finally {
+      setDeleteDialogOpen(false);
+      setInvoiceToDelete(null);
+    }
+  }, [invoiceToDelete, fetchData]);
 
   const columnDefs = [
     // Invoice Level Information
@@ -190,16 +273,38 @@ export function DataTable({
       headerName: "Invoice #",
       width: 130,
       pinned: "left",
+      filter: "agTextColumnFilter",
+      filterParams: {
+        filterOptions: ["contains", "equals", "startsWith", "endsWith"],
+        defaultOption: "contains",
+      },
     },
     {
       field: "companyFrom",
       headerName: "Company",
       width: 150,
+      filter: "agTextColumnFilter",
+      filterParams: {
+        filterOptions: ["contains", "equals", "startsWith", "endsWith"],
+        defaultOption: "contains",
+      },
     },
     {
       field: "invoiceDate",
       headerName: "Date",
       width: 120,
+      filter: "agDateColumnFilter",
+      filterParams: {
+        comparator: (filterLocalDateAtMidnight: Date, cellValue: string) => {
+          const cellDate = new Date(cellValue);
+          if (cellDate < filterLocalDateAtMidnight) {
+            return -1;
+          } else if (cellDate > filterLocalDateAtMidnight) {
+            return 1;
+          }
+          return 0;
+        },
+      },
       valueFormatter: (params: any) =>
         params.value ? format(new Date(params.value), "dd/MM/yyyy") : "",
     },
@@ -209,11 +314,21 @@ export function DataTable({
       field: "itemCode",
       headerName: "Item Code",
       width: 120,
+      filter: "agTextColumnFilter",
+      filterParams: {
+        filterOptions: ["contains", "equals", "startsWith", "endsWith"],
+        defaultOption: "contains",
+      },
     },
     {
       field: "description",
       headerName: "Description",
       width: 200,
+      filter: "agTextColumnFilter",
+      filterParams: {
+        filterOptions: ["contains", "equals", "startsWith", "endsWith"],
+        defaultOption: "contains",
+      },
       cellStyle: (params: any) => {
         if (params.data.isTotal) {
           return {
@@ -230,17 +345,28 @@ export function DataTable({
       headerName: "Qty",
       width: 90,
       type: "numericColumn",
+      filter: "agNumberColumnFilter",
+      valueFormatter: (params: any) => {
+        if (params.data.isTotal) return "";
+        return params.value || "";
+      },
     },
     {
       field: "unit",
       headerName: "Unit",
       width: 90,
+      filter: "agTextColumnFilter",
+      filterParams: {
+        filterOptions: ["contains", "equals", "startsWith", "endsWith"],
+        defaultOption: "equals",
+      },
     },
     {
       field: "pricePerItem",
       headerName: "Price/Item",
       width: 120,
       type: "numericColumn",
+      filter: "agNumberColumnFilter",
       valueFormatter: (params: any) =>
         params.value ? `£${params.value.toFixed(2)}` : "",
     },
@@ -251,6 +377,7 @@ export function DataTable({
       headerName: "Item Gross",
       width: 120,
       type: "numericColumn",
+      filter: "agNumberColumnFilter",
       valueFormatter: (params: any) =>
         params.value ? `£${params.value.toFixed(2)}` : "",
     },
@@ -259,6 +386,7 @@ export function DataTable({
       headerName: "Item VAT",
       width: 120,
       type: "numericColumn",
+      filter: "agNumberColumnFilter",
       valueFormatter: (params: any) =>
         params.value ? `£${params.value.toFixed(2)}` : "",
     },
@@ -267,8 +395,21 @@ export function DataTable({
       headerName: "Item Net",
       width: 120,
       type: "numericColumn",
+      filter: "agNumberColumnFilter",
       valueFormatter: (params: any) =>
         params.value ? `£${params.value.toFixed(2)}` : "",
+    },
+    {
+      headerName: "",
+      field: "actions",
+      width: 100,
+      cellRenderer: DeleteCell,
+      cellRendererParams: {
+        onDelete: handleDelete,
+      },
+      sortable: false,
+      filter: false,
+      pinned: "right",
     },
   ];
 
@@ -284,11 +425,34 @@ export function DataTable({
     fetchData();
   }, [fetchData]);
 
+  // Add row styling based on row type
+  const getRowStyle = (params: any) => {
+    if (params.data.isTotal) {
+      return {
+        fontWeight: "bold",
+        backgroundColor: "#f0f8ff",
+        borderBottom: "2px solid #e5e7eb",
+      };
+    }
+    // Empty separator row style
+    if (!params.data.invoiceNumber && !params.data.description) {
+      return {
+        backgroundColor: "#f9fafb",
+        height: "20px",
+        borderBottom: "1px solid #e5e7eb",
+      };
+    }
+    return null;
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Invoices</CardTitle>
-        <CardDescription>View and manage invoice details</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+        <div>
+          <CardTitle>Invoices</CardTitle>
+          <CardDescription>View and manage invoice details</CardDescription>
+        </div>
+        <FileUpload onUploadSuccess={fetchData} />
       </CardHeader>
       <CardContent>
         <style>{gridStyles}</style>
@@ -297,10 +461,11 @@ export function DataTable({
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
-            pagination={true}
-            paginationPageSize={15}
+            pagination={false}
+            // paginationPageSize={15}
             rowSelection="multiple"
             onGridReady={onGridReady}
+            getRowStyle={getRowStyle}
             overlayLoadingTemplate={
               '<span class="ag-overlay-loading-center">Loading invoices...</span>'
             }
@@ -321,6 +486,27 @@ export function DataTable({
           />
         </div>
       </CardContent>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the
+              invoice and all its items.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
