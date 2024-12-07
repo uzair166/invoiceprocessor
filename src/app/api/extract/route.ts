@@ -126,7 +126,7 @@ export async function POST(req: Request) {
           { role: "user", content: pdfData.text },
         ],
         // model: "gpt-3.5-turbo-1106",
-        model: "gpt-4",
+        model: "gpt-4-turbo",
         temperature: 0.1,
         response_format: { type: "json_object" },
       });
