@@ -25,6 +25,48 @@ import {
 import { Input } from "@/components/ui/input";
 import toast from "react-hot-toast";
 
+// Custom styles for AG Grid
+const gridStyles = `
+  .ag-theme-alpine .ag-header-cell {
+    padding: 0 8px !important;
+    height: 30px !important;
+    line-height: 30px !important;
+    border-right: 2px solid #c8ccd4 !important;
+  }
+  .ag-theme-alpine .ag-header-cell:nth-child(odd) {
+    background-color: #f3f4f6 !important;
+  }
+  .ag-theme-alpine .ag-header-cell:nth-child(even) {
+    background-color: #e5e7eb !important;
+  }
+  .ag-theme-alpine .ag-header-cell-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .ag-theme-alpine .ag-header {
+    border-bottom: 2px solid #9ca3af !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+  }
+  .ag-theme-alpine .ag-header-row {
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+  }
+  .ag-theme-alpine .ag-header-row-column {
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+  }
+  .ag-theme-alpine .ag-header-viewport {
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+  }
+`;
+
 // Suppress AG Grid license errors
 const originalConsoleError = console.error;
 console.error = (...args) => {
@@ -43,56 +85,40 @@ console.error = (...args) => {
 interface Invoice {
   _id: string;
   invoiceNumber: string;
+  companyFrom: string;
   invoiceDate: string;
-  dueDate: string;
-  paymentTerms: string;
-  clientInfo: {
-    name: string;
-    contactPerson: string;
-    address: {
-      street: string;
-      city: string;
-      state: string;
-      zip: string;
-      country: string;
-    };
-    email: string;
-    phone: string;
-  };
-  businessInfo: {
-    name: string;
-    address: {
-      street: string;
-      city: string;
-      state: string;
-      zip: string;
-      country: string;
-    };
-    email: string;
-    phone: string;
-    taxId: string;
-  };
+  grossTotal: number;
+  vatTotal: number;
+  netTotal: number;
   items: Array<{
+    itemCode: string;
     description: string;
     quantity: number;
-    unitPrice: number;
-    lineTotal: number;
+    unit: string;
+    pricePerItem: number;
+    grossTotal: number;
+    vatAmount: number;
+    netTotal: number;
   }>;
-  subtotal: number;
-  discount: number;
-  taxRate: number;
-  taxAmount: number;
-  totalAmount: number;
-  paymentDetails: {
-    method: string;
-    status: string;
-    paymentDate: string;
-    transactionReference: string;
-    balanceDue: number;
-  };
-  pdfUrl: string;
-  createdAt: string;
-  lastUpdated: string;
+}
+
+interface FlattenedInvoiceRow {
+  _id: string;
+  invoiceNumber: string;
+  companyFrom: string;
+  invoiceDate: string;
+  invoiceGrossTotal: number;
+  invoiceVatTotal: number;
+  invoiceNetTotal: number;
+  itemCode: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  pricePerItem: number;
+  itemGrossTotal: number;
+  itemVatAmount: number;
+  itemNetTotal: number;
+  isTotal: boolean;
 }
 
 export function DataTable({
@@ -104,362 +130,177 @@ export function DataTable({
   fetchData: () => Promise<void>;
   isLoading: boolean;
 }) {
-  const [gridApi, setGridApi] = useState<GridApi | null>(null);
+  const [rowData, setRowData] = useState<FlattenedInvoiceRow[]>([]);
 
-  const defaultColDef = useMemo(
-    () => ({
-      sortable: true,
-      filter: true,
-      resizable: true,
-      floatingFilter: true,
-      enableValue: true,
-      minWidth: 150,
-      suppressSizeToFit: false,
-      cellStyle: {
-        textOverflow: "ellipsis",
-        overflow: "hidden",
-        whiteSpace: "nowrap",
-      },
-    }),
-    []
-  );
+  // Transform invoice data into flattened rows
+  useEffect(() => {
+    const flattenedRows: FlattenedInvoiceRow[] = [];
 
-  const statusBarComponent = useMemo<StatusPanelDef[]>(
-    () => [
-      { statusPanel: "agTotalAndFilteredRowCountComponent", align: "left" },
-      { statusPanel: "agTotalRowCountComponent", align: "center" },
-      { statusPanel: "agFilteredRowCountComponent" },
-      { statusPanel: "agSelectedRowCountComponent" },
-      { statusPanel: "agAggregationComponent" },
-    ],
-    []
-  );
+    data.forEach((invoice) => {
+      // Add individual item rows
+      invoice.items.forEach((item) => {
+        flattenedRows.push({
+          _id: invoice._id,
+          invoiceNumber: invoice.invoiceNumber,
+          companyFrom: invoice.companyFrom,
+          invoiceDate: invoice.invoiceDate,
+          invoiceGrossTotal: invoice.grossTotal,
+          invoiceVatTotal: invoice.vatTotal,
+          invoiceNetTotal: invoice.netTotal,
+          itemCode: item.itemCode,
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          pricePerItem: item.pricePerItem,
+          itemGrossTotal: item.grossTotal,
+          itemVatAmount: item.vatAmount,
+          itemNetTotal: item.netTotal,
+          isTotal: false,
+        });
+      });
 
-  const columnDefs = useMemo<ColDef<Invoice>[]>(
-    () => [
-      {
-        field: "invoiceNumber",
-        headerName: "Invoice #",
-        pinned: "left",
-        checkboxSelection: true,
-        headerCheckboxSelection: true,
-        filter: "agTextColumnFilter",
-        filterParams: { defaultOption: "contains" },
-        minWidth: 130,
-      },
-      {
-        field: "paymentDetails.status",
-        headerName: "Status",
-        cellRenderer: (params: ICellRendererParams<Invoice>) => {
-          const status = params.value || "Unpaid";
-          return (
-            <div
-              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                status === "Paid"
-                  ? "bg-green-100 text-green-800"
-                  : status === "Overdue"
-                  ? "bg-red-100 text-red-800"
-                  : status === "Partial"
-                  ? "bg-yellow-100 text-yellow-800"
-                  : "bg-gray-100 text-gray-800"
-              }`}
-            >
-              {status}
-            </div>
-          );
-        },
-        filter: "agTextColumnFilter",
-        minWidth: 120,
-      },
-      {
-        field: "totalAmount",
-        headerName: "Total Amount",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value
-            ? new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(params.value)
-            : "-",
-        filter: "agNumberColumnFilter",
-        aggFunc: "sum",
-        minWidth: 120,
-      },
-      {
-        field: "paymentDetails.balanceDue",
-        headerName: "Balance Due",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value
-            ? new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(params.value)
-            : "-",
-        filter: "agNumberColumnFilter",
-        aggFunc: "sum",
-        minWidth: 120,
-      },
-      {
-        field: "clientInfo.name",
-        headerName: "Client Name",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "invoiceDate",
-        headerName: "Date",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value ? format(new Date(params.value), "MMM dd, yyyy") : "-",
-        filter: "agDateColumnFilter",
-        filterParams: {
-          comparator: (filterLocalDateAtMidnight: Date, cellValue: string) => {
-            const cellDate = new Date(cellValue);
-            if (cellDate < filterLocalDateAtMidnight) return -1;
-            if (cellDate > filterLocalDateAtMidnight) return 1;
-            return 0;
-          },
-        },
-        minWidth: 120,
-      },
-      {
-        field: "dueDate",
-        headerName: "Due Date",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value ? format(new Date(params.value), "MMM dd, yyyy") : "-",
-        filter: "agDateColumnFilter",
-        minWidth: 120,
-      },
-      {
-        field: "paymentDetails.method",
-        headerName: "Payment Method",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "paymentDetails.paymentDate",
-        headerName: "Payment Date",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value ? format(new Date(params.value), "MMM dd, yyyy") : "-",
-        filter: "agDateColumnFilter",
-        minWidth: 120,
-      },
-      {
-        field: "paymentDetails.transactionReference",
-        headerName: "Transaction Ref",
-        filter: "agTextColumnFilter",
-        minWidth: 150,
-      },
-      {
-        field: "subtotal",
-        headerName: "Subtotal",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value
-            ? new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(params.value)
-            : "-",
-        filter: "agNumberColumnFilter",
-        aggFunc: "sum",
-        minWidth: 120,
-      },
-      {
-        field: "discount",
-        headerName: "Discount",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value
-            ? new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(params.value)
-            : "-",
-        filter: "agNumberColumnFilter",
-        aggFunc: "sum",
-        minWidth: 120,
-      },
-      {
-        field: "taxRate",
-        headerName: "Tax Rate",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value ? `${params.value}%` : "-",
-        filter: "agNumberColumnFilter",
-        minWidth: 100,
-      },
-      {
-        field: "taxAmount",
-        headerName: "Tax Amount",
-        valueFormatter: (params: ValueFormatterParams<Invoice>) =>
-          params.value
-            ? new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(params.value)
-            : "-",
-        filter: "agNumberColumnFilter",
-        aggFunc: "sum",
-        minWidth: 120,
-      },
-      {
-        field: "clientInfo.contactPerson",
-        headerName: "Contact Person",
-        filter: "agTextColumnFilter",
-        minWidth: 160,
-      },
-      {
-        field: "clientInfo.email",
-        headerName: "Client Email",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "clientInfo.phone",
-        headerName: "Client Phone",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "paymentTerms",
-        headerName: "Payment Terms",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "clientInfo.address.street",
-        headerName: "Client Street",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "clientInfo.address.city",
-        headerName: "Client City",
-        filter: "agTextColumnFilter",
-        minWidth: 150,
-      },
-      {
-        field: "clientInfo.address.state",
-        headerName: "Client State",
-        filter: "agTextColumnFilter",
-        minWidth: 120,
-      },
-      {
-        field: "clientInfo.address.zip",
-        headerName: "Client ZIP",
-        filter: "agTextColumnFilter",
-        minWidth: 100,
-      },
-      {
-        field: "clientInfo.address.country",
-        headerName: "Client Country",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "businessInfo.name",
-        headerName: "Business Name",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "businessInfo.email",
-        headerName: "Business Email",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "businessInfo.phone",
-        headerName: "Business Phone",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "businessInfo.taxId",
-        headerName: "Tax ID",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-      {
-        field: "businessInfo.address.street",
-        headerName: "Business Street",
-        filter: "agTextColumnFilter",
-        minWidth: 200,
-      },
-      {
-        field: "businessInfo.address.city",
-        headerName: "Business City",
-        filter: "agTextColumnFilter",
-        minWidth: 150,
-      },
-      {
-        field: "businessInfo.address.state",
-        headerName: "Business State",
-        filter: "agTextColumnFilter",
-        minWidth: 120,
-      },
-      {
-        field: "businessInfo.address.zip",
-        headerName: "Business ZIP",
-        filter: "agTextColumnFilter",
-        minWidth: 100,
-      },
-      {
-        field: "businessInfo.address.country",
-        headerName: "Business Country",
-        filter: "agTextColumnFilter",
-        minWidth: 140,
-      },
-    ],
-    []
-  );
+      // Add total row
+      flattenedRows.push({
+        _id: invoice._id,
+        invoiceNumber: invoice.invoiceNumber,
+        companyFrom: invoice.companyFrom,
+        invoiceDate: invoice.invoiceDate,
+        invoiceGrossTotal: invoice.grossTotal,
+        invoiceVatTotal: invoice.vatTotal,
+        invoiceNetTotal: invoice.netTotal,
+        itemCode: "",
+        description: "TOTAL FOR INVOICE",
+        quantity: 0,
+        unit: "",
+        pricePerItem: 0,
+        itemGrossTotal: invoice.grossTotal,
+        itemVatAmount: invoice.vatTotal,
+        itemNetTotal: invoice.netTotal,
+        isTotal: true,
+      });
+    });
 
-  const onGridReady = useCallback(
-    (params: GridReadyEvent) => {
-      try {
-        setGridApi(params.api);
-        params.api.sizeColumnsToFit();
-        // Fetch data when grid is ready
-        fetchData();
-      } catch (error) {
-        console.error("Error initializing grid:", error);
-        toast.error("Error initializing grid");
-      }
+    setRowData(flattenedRows);
+  }, [data]);
+
+  const columnDefs = [
+    // Invoice Level Information
+    {
+      field: "invoiceNumber",
+      headerName: "Invoice #",
+      width: 130,
+      pinned: "left",
     },
-    [fetchData]
-  );
+    {
+      field: "companyFrom",
+      headerName: "Company",
+      width: 150,
+    },
+    {
+      field: "invoiceDate",
+      headerName: "Date",
+      width: 120,
+      valueFormatter: (params: any) =>
+        params.value ? format(new Date(params.value), "dd/MM/yyyy") : "",
+    },
 
-  const onFirstDataRendered = useCallback(() => {
-    try {
-      if (gridApi) {
-        gridApi.sizeColumnsToFit();
-      }
-    } catch (error) {
-      console.error("Error sizing columns:", error);
-      toast.error("Error sizing columns");
-    }
-  }, [gridApi]);
+    // Item Level Information
+    {
+      field: "itemCode",
+      headerName: "Item Code",
+      width: 120,
+    },
+    {
+      field: "description",
+      headerName: "Description",
+      width: 200,
+      cellStyle: (params: any) => {
+        if (params.data.isTotal) {
+          return {
+            fontWeight: "bold",
+            backgroundColor: "#f0f8ff",
+            color: "#2563eb",
+          };
+        }
+        return null;
+      },
+    },
+    {
+      field: "quantity",
+      headerName: "Qty",
+      width: 90,
+      type: "numericColumn",
+    },
+    {
+      field: "unit",
+      headerName: "Unit",
+      width: 90,
+    },
+    {
+      field: "pricePerItem",
+      headerName: "Price/Item",
+      width: 120,
+      type: "numericColumn",
+      valueFormatter: (params: any) =>
+        params.value ? `£${params.value.toFixed(2)}` : "",
+    },
+
+    // Item Totals
+    {
+      field: "itemGrossTotal",
+      headerName: "Item Gross",
+      width: 120,
+      type: "numericColumn",
+      valueFormatter: (params: any) =>
+        params.value ? `£${params.value.toFixed(2)}` : "",
+    },
+    {
+      field: "itemVatAmount",
+      headerName: "Item VAT",
+      width: 120,
+      type: "numericColumn",
+      valueFormatter: (params: any) =>
+        params.value ? `£${params.value.toFixed(2)}` : "",
+    },
+    {
+      field: "itemNetTotal",
+      headerName: "Item Net",
+      width: 120,
+      type: "numericColumn",
+      valueFormatter: (params: any) =>
+        params.value ? `£${params.value.toFixed(2)}` : "",
+    },
+  ];
+
+  const defaultColDef = {
+    sortable: true,
+    filter: true,
+    resizable: true,
+    suppressMenu: true,
+    floatingFilter: false,
+  };
+
+  const onGridReady = useCallback(() => {
+    fetchData();
+  }, [fetchData]);
 
   return (
-    <Card className="w-full">
+    <Card>
       <CardHeader>
         <CardTitle>Invoices</CardTitle>
-        <CardDescription>Manage and track your invoices</CardDescription>
+        <CardDescription>View and manage invoice details</CardDescription>
       </CardHeader>
       <CardContent>
+        <style>{gridStyles}</style>
         <div className="ag-theme-alpine w-full h-[600px]">
           <AgGridReact
-            rowData={data}
+            rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             pagination={true}
-            paginationPageSize={10}
-            enableCellTextSelection={true}
+            paginationPageSize={15}
             rowSelection="multiple"
             onGridReady={onGridReady}
-            onFirstDataRendered={onFirstDataRendered}
-            statusBar={statusBarComponent}
-            loadingOverlayComponent={"Loading..."}
-            loadingOverlayComponentParams={{
-              loadingMessage: "Loading invoices...",
-            }}
             overlayLoadingTemplate={
               '<span class="ag-overlay-loading-center">Loading invoices...</span>'
             }
@@ -475,20 +316,8 @@ export function DataTable({
                   iconKey: "columns",
                   toolPanel: "agColumnsToolPanel",
                 },
-                {
-                  id: "filters",
-                  labelDefault: "Filters",
-                  labelKey: "filters",
-                  iconKey: "filter",
-                  toolPanel: "agFiltersToolPanel",
-                },
               ],
-              defaultToolPanel: "columns",
-              position: "right",
             }}
-            suppressMenuHide={true}
-            enableRangeSelection={true}
-            enableCharts={true}
           />
         </div>
       </CardContent>

@@ -7,7 +7,7 @@ import Invoice from "@/models/Invoice";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// Add CORS preflight
+// CORS preflight
 export async function OPTIONS() {
   return NextResponse.json(
     {},
@@ -21,74 +21,47 @@ export async function OPTIONS() {
   );
 }
 
-// Custom logger for detailed process tracking
-const logger = {
-  info: (message: string, data?: any) => {
-    console.log(`[INFO] ${message}`, data ? JSON.stringify(data, null, 2) : "");
-  },
-  error: (message: string, error: any) => {
-    console.error(`[ERROR] ${message}`, error);
-    if (error.stack) console.error(error.stack);
-  },
-};
-
-// Helper functions for data cleaning
-function cleanValue(value: any) {
-  if (value === "" || value === "undefined" || value === "null") return null;
-  return value;
-}
-
-function parseNumber(value: any): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") return value;
-  if (typeof value === "string") {
-    const cleaned = value.replace(/[^0-9.-]/g, "");
-    return cleaned ? parseFloat(cleaned) : null;
-  }
-  return null;
-}
-
-function parseDate(value: any): Date | null {
-  if (!value) return null;
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? null : date;
-}
-
 // Optimized prompt for faster processing
-const EXTRACTION_PROMPT = `Extract invoice data as JSON. Format: dates as YYYY-MM-DD, monetary values as numbers (1234.56), remove currency symbols, convert thousand separators. Return null for missing fields.
+const EXTRACTION_PROMPT = `Extract invoice data as JSON. Focus on these specific fields:
 
+1. Invoice level:
+   - Invoice number (e.g., "3620/00104227" or "E17/IN525138")
+   - Company the invoice is from (e.g., "Jewson" or "C&S Builders Merchants")
+   - Invoice date (format: YYYY-MM-DD)
+   - Gross total (before VAT)
+   - VAT amount
+   - Net total (after VAT)
+
+2. For each item:
+   - Item code/SKU (e.g., "AGSTB005" or "969696905865")
+   - Description (e.g., "JEWSON Sharp Concreting Sand")
+   - Quantity (as number)
+   - Unit (e.g., "EA" or "BAG")
+   - Price per item (as number)
+   - Gross total for item
+   - VAT amount for item
+   - Net total for item
+
+Return as JSON:
 {
   "invoiceNumber": "string",
+  "companyFrom": "string",
   "invoiceDate": "YYYY-MM-DD",
-  "dueDate": "YYYY-MM-DD",
-  "paymentTerms": "string",
-  "clientInfo": {
-    "name": "string",
-    "contactPerson": "string",
-    "address": {"street": "string", "city": "string", "state": "string", "zip": "string", "country": "string"},
-    "email": "string",
-    "phone": "string"
-  },
-  "businessInfo": {
-    "name": "string",
-    "address": {"street": "string", "city": "string", "state": "string", "zip": "string", "country": "string"},
-    "email": "string",
-    "phone": "string",
-    "taxId": "string"
-  },
-  "items": [{"description": "string", "quantity": number, "unitPrice": number, "lineTotal": number}],
-  "subtotal": number,
-  "discount": number,
-  "taxRate": number,
-  "taxAmount": number,
-  "totalAmount": number,
-  "paymentDetails": {
-    "method": "string",
-    "status": "Paid|Unpaid|Overdue|Partial",
-    "paymentDate": "YYYY-MM-DD",
-    "transactionReference": "string",
-    "balanceDue": number
-  }
+  "grossTotal": number,
+  "vatTotal": number,
+  "netTotal": number,
+  "items": [
+    {
+      "itemCode": "string",
+      "description": "string",
+      "quantity": number,
+      "unit": "string",
+      "pricePerItem": number,
+      "grossTotal": number,
+      "vatAmount": number,
+      "netTotal": number
+    }
+  ]
 }`;
 
 export async function POST(req: Request) {
@@ -99,8 +72,6 @@ export async function POST(req: Request) {
   };
 
   try {
-    logger.info("Starting invoice processing");
-
     // Get file from request
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -128,11 +99,6 @@ export async function POST(req: Request) {
       );
     }
 
-    logger.info("File validation passed", {
-      filename: file.name,
-      size: file.size,
-    });
-
     try {
       // Convert file to buffer and extract text
       const arrayBuffer = await file.arrayBuffer();
@@ -155,10 +121,14 @@ export async function POST(req: Request) {
           { role: "system", content: EXTRACTION_PROMPT },
           { role: "user", content: pdfData.text },
         ],
-        model: "gpt-4",
-        temperature: 0.1, // Lower temperature for more focused responses
-        response_format: { type: "json_object" }, // Enforce JSON response
+        model: "gpt-3.5-turbo-1106",
+        temperature: 0.1,
+        response_format: { type: "json_object" },
       });
+
+      if (!completion.choices[0].message.content) {
+        throw new Error("Failed to get content from OpenAI response");
+      }
 
       // Parse and validate the extracted data
       const extractedData = JSON.parse(completion.choices[0].message.content);
@@ -181,8 +151,8 @@ export async function POST(req: Request) {
         },
         { headers }
       );
-    } catch (error: any) {
-      logger.error("Processing error", error);
+    } catch (error: Error) {
+      console.error("Processing error:", error);
       return NextResponse.json(
         {
           error: "Error processing invoice",
@@ -191,8 +161,8 @@ export async function POST(req: Request) {
         { status: 500, headers }
       );
     }
-  } catch (error: any) {
-    logger.error("Fatal error", error);
+  } catch (error: Error) {
+    console.error("Fatal error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500, headers }
