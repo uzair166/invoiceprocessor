@@ -446,7 +446,7 @@ export function DataTable({
   };
 
   return (
-    <Card>
+    <Card className="h-[calc(100vh-4rem)]">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
         <div>
           <CardTitle>Invoices</CardTitle>
@@ -456,13 +456,12 @@ export function DataTable({
       </CardHeader>
       <CardContent>
         <style>{gridStyles}</style>
-        <div className="ag-theme-alpine w-full h-[600px]">
+        <div className="ag-theme-alpine w-full h-[calc(100vh-12rem)]">
           <AgGridReact
             rowData={rowData}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             pagination={false}
-            // paginationPageSize={15}
             rowSelection="multiple"
             onGridReady={onGridReady}
             getRowStyle={getRowStyle}
