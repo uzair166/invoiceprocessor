@@ -26,7 +26,7 @@ const EXTRACTION_PROMPT = `Extract data for ALL invoices in the PDF as JSON. Eac
 
 1. Invoice level:
    - Invoice number (e.g., "3620/00104227" or "E17/IN525138")
-   - Company the invoice is from (e.g., "Jewson" or "C&S Builders Merchants")
+   - Company the invoice is from (e.g., "Jewson" or "C&S Builders Merchants") if there are multiple like overall company name and individual include both like "Jewson STARK Building Materials UK Limited"
    - Invoice date (format: YYYY-MM-DD)
    - Gross total (before VAT)
    - VAT amount
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
           { role: "user", content: pdfData.text },
         ],
         // model: "gpt-3.5-turbo-1106",
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         temperature: 0.1,
         response_format: { type: "json_object" },
       });
